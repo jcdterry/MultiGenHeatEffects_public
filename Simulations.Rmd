@@ -1,0 +1,532 @@
+---
+title: "Simulations"
+author: "Natalie Bright & Chris Terry"
+output: 
+  html_document: 
+    toc: true
+editor_options: 
+  chunk_output_type: console
+---
+
+# Introduction 
+
+This script conducts and analyses the simulations. The simulation scripts themselves are stored separately `Scripts/`. 
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(bbmle)
+library(viridis)
+library(RColorBrewer)
+library(wesanderson)
+library(psych) ## for geometric mean
+library(lme4)
+library(lmerTest)
+library(cowplot)
+library(knitr)
+```
+
+
+# Fly interpolation function
+
+
+## Parameters and interpolation
+
+```{r}
+load('Fly TPC models/NB_AllG0Seperate_fit')
+
+topt19  = 28.3656893
+topt23 =  28.3467465
+topt27 =  29.0000000
+rmax19 =  46.1107868 
+rmax23 =  71.3059568 
+rmax27 =  20.4986572 
+a19   = 4.2125259  
+a23   = 3.6526915 
+a27   = 3.2156789 
+
+cTmax = 30
+
+## Rmax
+
+Rmax_interp<- Vectorize(function(G0){
+  Rmax<- ifelse( G0<23, rmax19 + ((G0-19)/4) * (rmax23 - rmax19),
+                 rmax23 + ((G0-23)/4) * (rmax27 - rmax23))
+  ifelse( Rmax< 0.1, return(0.1), return(Rmax))
+})
+
+## Topt
+Topt_interp<- Vectorize(function(G0){
+  Topt<-  ifelse( G0<23, topt19 + ((G0-19)/4) * (topt23 - topt19),
+                  topt23 + ((G0-23)/4) * (topt27 - topt23)) 
+  
+  ifelse( Topt>(cTmax-0.1) , return(cTmax-0.1), return(Topt))
+})
+
+## A
+a_interp<- Vectorize(function(G0){
+  ifelse( G0<23, a19 + ((G0-19)/4) * (a23 - a19),
+          a23 + ((G0-23)/4) * (a27 - a23))
+})
+```
+
+## Plotting interpolations
+
+```{r}
+## checking it works
+G0_seq <- seq( from = 19, to = 30, by =0.1)
+
+data.frame( G0= seq( from = 19, to = 30, by =0.1))%>%
+  mutate( Topt = Topt_interp(G0), 
+          Rmax= Rmax_interp(G0),
+          a = a_interp(G0) ,
+          Col = ifelse( G0 %in% c(19,23,27), 'red', 'black')) %>%
+  pivot_longer(cols = c(Topt,Rmax, a ),
+               names_to = 'Parameter',  values_to = 'Value') %>%
+  ggplot(aes( x = G0, y = Value, col = Col))+
+  geom_point()+
+  facet_wrap(~Parameter, scale = 'free_y', labeller = label_both)+
+  scale_color_identity()+
+  scale_x_continuous(breaks = 19:30)+
+  xlab('G0 Temperature (°C)')+
+  ylab('')+
+  ggtitle('Fly Parameter Interpolation')+
+  theme_bw() -> EPCFigA
+
+EPCFigA
+```
+
+## Function to calculate Environmental Performance Curve
+
+```{r}
+EPC_trans = function(G1_temp, G0_temp, cTmax){
+  Rmax<- Rmax_interp(G0_temp)
+  Topt<- Topt_interp(G0_temp)
+  a   <- a_interp(   G0_temp)
+  R =  Rmax* ifelse(G1_temp < Topt,
+                    exp(-((G1_temp - Topt)/(2 * a))^2), 
+                    1 - ((G1_temp - Topt)/(Topt - cTmax))^2)
+  return(R)
+}
+```
+
+## Plotting full EPCs
+
+```{r}
+color_palette1 <- wes_palette("Zissou1", 12, type = "continuous")
+
+expand_grid(G0 = seq(from = 19, to = 30, by = 1),
+            G1 = seq(from = 19, to = 30, by = 0.01 )) %>%
+  mutate( Rmax = Rmax_interp(G0),
+          Topt = Topt_interp(G0),
+          a = a_interp(G0), 
+          R_predict = EPC_trans( G1_temp = G1, G0, cTmax=30)) %>%
+  mutate(R_predict = ifelse(R_predict<0, 0, R_predict )) %>%
+  ggplot(aes(x = G1, y = R_predict, col = factor(G0))) +
+  geom_line() +
+  labs(title="Fly Environmental Performance Curve",
+       x="G1 Temperature (°C)", y="Population growth rate",
+       colour="G0 Temperature\n(°C)") +
+  guides(col=guide_legend(ncol=2))+
+  scale_color_manual(values = color_palette1) +
+  theme_bw()-> EPCFigB
+
+EPCFigB
+
+XXXX<- plot_grid(EPCFigA, EPCFigB, ncol = 1,
+          rel_heights = c(1, 1),
+          labels = c('a)', 'b)'))
+
+ggsave(plot = XXXX, filename ='Figures/FlyParamPlots.png', height =6, width =7)
+
+
+```
+
+# Utility Functions and parameters
+
+```{r}
+setup<- list( 'Av_temp' = 24, 
+              'MaxTemp' = 29, 
+              'burnin' = 500,  #burn-in time
+              'CC_time' = 2000, #climate change time - 2000 gens = so to around year 2100 - at worst climate change scenarios could be up to 4.7 degrees of warming above baseline by 2100 (IPCC report)
+              'temp_sd' = 1,   #standard deviation of temp - sd of Australian data summer av mid temps = 1.1
+              'Start_flies' = 10000, 
+              'Start_wasps' = 100, 
+              'threshold' = 1, #below 1 individual, deemed extinct
+              'AutoCorrelated' = FALSE,
+              'autocorrelation' = 0.8, #ac of Australian av mid temp = 0.879
+              'transgenerational_fly'= TRUE,
+              'transgenerational_wasp' = TRUE) 
+
+params<- list(
+  ## fly params
+  'topt'= 26.313093,  ## from all together fit 
+  'rmax' =  38.854392, ## from all together fit 
+  'fly_a' = 3.052021, ## from all together fit
+  'ctmax' = 30, 
+  'fly_K' = 100000,     #setting large carrying capacity 
+  'fly_fail'= 20,
+  ## wasp params
+  'wasp_aMODA' = 0.14*0.00026,
+  'wasp_aMODB' = 0.00026,
+  'wasp_h' = 0.01, ## set like this because 1/100 = max number of eggs
+  'wasp_k' = 0.65 
+)
+
+```
+
+# Simulations
+
+```{r}
+## Load models fitted to experimental data
+load('Outputs/WaspModel') ##waspglm2_poly
+load('Outputs/WaspModel_NoG0') ##waspglm2_no_G0
+##NB model predictions will be on generalised scale use boot::inv.logit() to back transform 
+
+## Load simulation model functions
+source('Scripts/TestExtinctionPoint_ModelA.R' )
+source('Scripts/TestExtinctionPoint_ModelB.R' )
+
+```
+
+## Generating Temperature Sequences
+
+```{r}
+L <- setup$burnin + setup$CC_time  #overall time
+set.seed(1)
+Env_vec <- c( rep(setup$Av_temp,setup$burnin), 
+              seq( from = setup$Av_temp, to = setup$MaxTemp, 
+                   length.out = setup$CC_time )) + rnorm(L,  mean = 0,
+                                                         sd = setup$temp_sd)
+
+Env_vec[ Env_vec>(params$ctmax -0.1) ] <- (params$ctmax-0.1) #stop going above ctmax
+```
+
+## Autocorrelated sequences
+
+```{R fig.height=4, fig.width=4}
+source('Scripts/Make_AC_data.R')
+## testing:
+Make_AC_data(2000, sd=3.567, AC=0.8) -> X
+plot(X[1:1999]~X[2:2000])
+mean(X)
+sd(X)
+```
+
+## Testing Examples
+
+```{r fig.height=3}
+setup$transgenerational_fly<-TRUE
+setup$transgenerational_wasp<-TRUE
+
+TestExtinctionPoint_ModelB(3, params = params, setup=setup, PLOT=TRUE )
+ggsave('Figures/TrajectoryExamples.png', width =10, height = 4, bg = 'white', dpi = 1000)
+
+setup$transgenerational_fly<-FALSE
+setup$transgenerational_wasp<-FALSE
+TestExtinctionPoint_ModelB(1, params = params, setup=setup, PLOT=TRUE )
+TestExtinctionPoint_ModelA(1, params = params, setup=setup, PLOT=TRUE )
+
+```
+
+# Main tests
+
+```{R}
+NUM_REPS = 100
+SimResults <-data.frame( TrialRep = 1:NUM_REPS )
+
+```
+
+## Model A 
+
+```{r eval = FALSE}
+## No autocorrelation
+
+setup$AutoCorrelated<-FALSE
+setup$transgenerational_fly<-TRUE
+setup$transgenerational_wasp<-TRUE
+
+SimResults$ModelA_NoAuto_BothTrans <- map_int(.x = 1:NUM_REPS,
+                                              .f =  TestExtinctionPoint_ModelA,
+                                              params = params, setup=setup, PLOT=FALSE)
+
+setup$transgenerational_fly<-FALSE
+setup$transgenerational_wasp<-FALSE
+SimResults$ModelA_NoAuto_NoTrans <- map_int(.x = 1:NUM_REPS,
+                                            .f =  TestExtinctionPoint_ModelA,
+                                            params = params, setup=setup, PLOT=FALSE)
+
+## With autocorrelation
+setup$AutoCorrelated<-TRUE
+setup$transgenerational_fly<-TRUE
+setup$transgenerational_wasp<-TRUE
+SimResults$ModelA_Auto_BothTrans <- map_int(.x = 1:NUM_REPS,
+                                            .f =  TestExtinctionPoint_ModelA,
+                                            params = params, setup=setup, PLOT=FALSE)
+
+setup$transgenerational_fly<-FALSE
+setup$transgenerational_wasp<-FALSE
+SimResults$ModelA_Auto_NoTrans <- map_int(.x = 1:NUM_REPS,
+                                          .f =  TestExtinctionPoint_ModelA,
+                                          params = params, setup=setup, PLOT=FALSE)
+
+```
+
+## Model B
+
+```{r eval = FALSE}
+## No autocorrelation
+setup$AutoCorrelated<-FALSE
+setup$transgenerational_fly<-TRUE
+setup$transgenerational_wasp<-TRUE
+
+SimResults$ModelB_NoAuto_BothTrans <- map_int(.x = 1:NUM_REPS,
+                                              .f =  TestExtinctionPoint_ModelB,
+                                              params = params, setup=setup, PLOT=FALSE)
+
+setup$transgenerational_fly<-FALSE
+setup$transgenerational_wasp<-FALSE
+SimResults$ModelB_NoAuto_NoTrans <- map_int(.x = 1:NUM_REPS,
+                                            .f =  TestExtinctionPoint_ModelB,
+                                            params = params, setup=setup, PLOT=FALSE)
+
+## With autocorrelation
+setup$AutoCorrelated<-TRUE
+setup$transgenerational_fly<-TRUE
+setup$transgenerational_wasp<-TRUE
+SimResults$ModelB_Auto_BothTrans <- map_int(.x = 1:NUM_REPS,
+                                            .f =  TestExtinctionPoint_ModelB,
+                                            params = params, setup=setup, PLOT=FALSE)
+
+setup$transgenerational_fly<-FALSE
+setup$transgenerational_wasp<-FALSE
+SimResults$ModelB_Auto_NoTrans <- map_int(.x = 1:NUM_REPS,
+                                          .f =  TestExtinctionPoint_ModelB,
+                                          params = params, setup=setup, PLOT=FALSE)
+
+```
+
+## Adding one on, one off transgenerational effects
+
+
+```{r eval = FALSE}
+### Model A 
+## No autocorrelation
+setup$AutoCorrelated<-FALSE
+setup$transgenerational_fly<-FALSE
+setup$transgenerational_wasp<-TRUE
+
+SimResults$ModelA_NoAuto_WaspTrans <- map_int(.x = 1:NUM_REPS,
+                                              .f =  TestExtinctionPoint_ModelA,
+                                              params = params, setup=setup, PLOT=FALSE)
+
+setup$transgenerational_fly<-TRUE
+setup$transgenerational_wasp<-FALSE
+SimResults$ModelA_NoAuto_FlyTrans <- map_int(.x = 1:NUM_REPS,
+                                            .f =  TestExtinctionPoint_ModelA,
+                                            params = params, setup=setup, PLOT=FALSE)
+
+## With autocorrelation
+setup$AutoCorrelated<-TRUE
+setup$transgenerational_fly<-FALSE
+setup$transgenerational_wasp<-TRUE
+SimResults$ModelA_Auto_WaspTrans <- map_int(.x = 1:NUM_REPS,
+                                            .f =  TestExtinctionPoint_ModelA,
+                                            params = params, setup=setup, PLOT=FALSE)
+
+setup$transgenerational_fly<-TRUE
+setup$transgenerational_wasp<-FALSE
+SimResults$ModelA_Auto_FlyTrans <- map_int(.x = 1:NUM_REPS,
+                                          .f =  TestExtinctionPoint_ModelA,
+                                          params = params, setup=setup, PLOT=FALSE)
+### Model B
+## No autocorrelation
+setup$AutoCorrelated<-FALSE
+setup$transgenerational_fly<-FALSE
+setup$transgenerational_wasp<-TRUE
+
+SimResults$ModelB_NoAuto_WaspTrans <- map_int(.x = 1:NUM_REPS,
+                                              .f =  TestExtinctionPoint_ModelB,
+                                              params = params, setup=setup, PLOT=FALSE)
+
+setup$transgenerational_fly<-TRUE
+setup$transgenerational_wasp<-FALSE
+SimResults$ModelB_NoAuto_FlyTrans <- map_int(.x = 1:NUM_REPS,
+                                            .f =  TestExtinctionPoint_ModelB,
+                                            params = params, setup=setup, PLOT=FALSE)
+
+## With autocorrelation
+setup$AutoCorrelated<-TRUE
+setup$transgenerational_fly<-FALSE
+setup$transgenerational_wasp<-TRUE
+SimResults$ModelB_Auto_WaspTrans <- map_int(.x = 1:NUM_REPS,
+                                            .f =  TestExtinctionPoint_ModelB,
+                                            params = params, setup=setup, PLOT=FALSE)
+
+setup$transgenerational_fly<-TRUE
+setup$transgenerational_wasp<-FALSE
+SimResults$ModelB_Auto_FlyTrans <- map_int(.x = 1:NUM_REPS,
+                                          .f =  TestExtinctionPoint_ModelB,
+                                          params = params, setup=setup, PLOT=FALSE)
+
+```
+
+## Combining and saving
+
+```{r eval = FALSE}
+SimResults %>%
+  pivot_longer(cols= -TrialRep,
+               names_to = 'Name', values_to = 'Extinctions') %>%
+  separate(Name, into = c('Model', 'AC', 'TransGen')) -> LongFormExtData
+
+LongFormExtData
+
+write_csv(LongFormExtData, "Outputs/CombinedLongSimulationOutputs.csv")
+
+```
+
+
+# Simulation Results Analysis
+
+```{r}
+LongFormExtData <- read_csv("Outputs/CombinedLongSimulationOutputs.csv")
+```
+
+```{r}
+LongFormExtData %>%
+  group_by(Model, AC, TransGen) %>%
+  summarise(GeomMean = psych::geometric.mean(Extinctions)) %>%
+  pivot_wider(id_cols = c(AC, TransGen),
+              names_from = Model,
+              values_from = GeomMean) %>% 
+  knitr::kable(digits = 2)
+
+
+
+LongFormExtData %>%
+  #filter(TransGen %in% c("BothTrans","NoTrans" ) ) %>%
+  ggplot( aes( x = Extinctions))+
+  geom_density(fill="#0072B2", aes( fill ="black"))   +
+#  geom_histogram(binwidth=log10(50), fill="#0072B2", colour="black")+
+  facet_grid(Model+AC~TransGen,
+             labeller = labeller(TransGen=c("BothTrans" = "Transgenerational Effects", 
+                                            "NoTrans" = "No Transgenerational Effects"),
+                                 AC=c("Auto" = "Autocorrelation",
+                                      "NoAuto" = "No Autocorrelation"),
+                                 Model=c("ModelA" = "Model A",
+                                         "ModelB" = "Model B")), switch = 'y')+
+   theme_bw(base_size = 12) +
+  theme(text = element_text(size = 10),
+        strip.background = element_rect(fill =NA)) +
+  labs(x = "Time to extinction (generations)", y = "Frequency")+
+  scale_x_log10(limits = c(200, 3000))
+
+
+
+LongFormExtData %>%
+  mutate(TransMod = case_match(TransGen,
+                                           "BothTrans" ~ "Both", 
+                                           "NoTrans" ~ "None",
+                                           'WaspTrans' ~ "Wasp Only"  ,
+                                           'FlyTrans'  ~ "Fly Only")) %>%
+  #filter(TransGen %in% c("BothTrans","NoTrans" ) ) %>%
+  ggplot( aes( x = Extinctions))+
+  geom_density(aes( fill = fct_relevel(TransMod, rev(c("Both", "Wasp Only","Fly Only", "None")))),
+                    alpha = 0.5)   +
+  #  geom_histogram(binwidth=log10(50), fill="#0072B2", colour="black")+
+  facet_grid(AC~Model,
+             labeller = labeller(AC=c("Auto" = "With Autocorrelation",
+                                      "NoAuto" = "No Autocorrelation"),
+                                 Model=c("ModelA" = "Model A",
+                                         "ModelB" = "Model B")), switch = 'y')+
+  theme_bw(base_size = 12) +
+  scale_fill_manual( name = 'Transgenerational\nEffects', values = c('blue','gold','darkgreen', 'red'))+
+  theme(text = element_text(size = 10),
+        strip.background = element_rect(fill =NA), legend.position = 'bottom') +
+  labs(x = "Time to extinction (generations)", y = "Frequency Density")+
+  scale_x_log10(limits = c(200, 3000))
+
+
+ggsave('Figures/SimulationHistograms.png', width = 6, height =5)
+
+```
+
+## Checking for overall interaction
+
+```{r}
+## reordering factors 
+
+LongFormExtData %>%
+   # filter(TransGen %in% c("BothTrans","NoTrans" ) ) %>%
+  mutate( AC = fct_relevel(AC, 'NoAuto'), 
+          TransGen = fct_relevel(TransGen, 'NoTrans') ) -> LongFormExtData
+
+## Interaction between trans-generational effects and autocorrelation
+model_geomA <- lmer( log10(Extinctions) ~ AC * TransGen +(1|TrialRep),
+                     data=filter(LongFormExtData, Model =='ModelA')) 
+model_geomB <- lmer( log10(Extinctions) ~ AC * TransGen +(1|TrialRep),
+                     data=filter(LongFormExtData, Model =='ModelB')) 
+
+
+summary(model_geomA) 
+summary(model_geomB)
+
+## NB Satterthwaite's method:
+anova(model_geomA) 
+anova(model_geomB) ## Not significant
+```
+
+```{R}
+LongFormExtData %>%
+  mutate( FlyTrans = TransGen %in% c("BothTrans", 'FlyTrans' ),
+          WaspTrans = TransGen %in% c("BothTrans", 'WaspTrans' ) ) -> SplitTrans
+```
+
+## Full model (three-way interactions)
+```{r}
+
+model_geomA_Full <- lmer( log10(Extinctions) ~ AC*FlyTrans*WaspTrans+(1|TrialRep),
+                     data=filter(SplitTrans, Model =='ModelA')) 
+model_geomB_Full <- lmer( log10(Extinctions) ~   AC*FlyTrans*WaspTrans+(1|TrialRep),
+                     data=filter(SplitTrans, Model =='ModelB')) 
+
+summary(model_geomA_Full)
+summary(model_geomA_Full)$coefficients[,1:3] %>% knitr::kable()
+
+
+summary(model_geomB_Full)
+summary(model_geomB_Full)$coefficients[,1:3] %>% knitr::kable()
+
+anova(model_geomA_Full) %>% knitr::kable()
+anova(model_geomB_Full) %>% knitr::kable()## Not significant
+
+```
+
+## Only 2-way interactions
+```{r}
+model_geomA_Split <- lmer( log10(Extinctions) ~ AC + FlyTrans+WaspTrans +AC:FlyTrans  +AC:WaspTrans  + FlyTrans:WaspTrans+(1|TrialRep),
+                     data=filter(SplitTrans, Model =='ModelA')) 
+
+model_geomB_Split <- lmer( log10(Extinctions) ~  AC + FlyTrans+WaspTrans +AC:FlyTrans  +AC:WaspTrans  + FlyTrans:WaspTrans+(1|TrialRep),
+                     data=filter(SplitTrans, Model =='ModelB')) 
+
+summary(model_geomA_Split) 
+summary(model_geomB_Split)
+## NB Satterthwaite's method:
+anova(model_geomA_Split) 
+anova(model_geomB_Split) ## Not significant
+```
+
+```{r}
+## Model A, isolating effect of fly trans by just having wasptrans
+model_geomA_focus <- lmer( log10(Extinctions) ~ AC*FlyTrans+(1|TrialRep),
+                     data=filter(SplitTrans, Model =='ModelA', WaspTrans)) 
+summary(model_geomA_focus)
+```
+
+
+
+# Session Info
+```{r}
+sessionInfo()
+```
+

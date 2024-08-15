@@ -1,0 +1,5 @@
+"Parameter","Description"
+"Topt","Optimum temperature"
+"Rmax","Maximum reproduction at optimum temperature"
+"CTmax","Critical thermal maximum"
+"a","Related to full curve width"

@@ -1,0 +1,167 @@
+---
+title: "Wasp TPC"
+author: "Natalie Bright & Chris Terry"
+output: 
+  html_document: 
+    toc: true
+editor_options: 
+  chunk_output_type: console
+---
+
+# Introduction
+
+This script fits and compares models for the wasp data. 
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+```
+
+```{r}
+Wasp_data <- read_csv("Raw Data/Wasp counts.csv")
+Wasp_data$Total_count <- rowSums(Wasp_data[, c("Wasp_count", "Fly_count")]) 
+Wasp_data$Wasp_proportion <- Wasp_data$Wasp_count / Wasp_data$Total_count
+```
+
+# Checking Assumptions
+
+```{r}
+Wasp_data %>%
+  ggplot(aes( y = Total_count, x = G1))+
+  geom_point()+  theme_classic()+  geom_smooth(method = 'lm')
+
+lm(data = Wasp_data,Total_count~   factor(G1) ) %>%anova()
+lm(data = Wasp_data,Total_count~G1 ) %>% summary()
+
+```
+
+# GLMs - logistic
+
+```{r}
+waspglm2 <- glm(Wasp_proportion ~ G1*G0, data=Wasp_data,
+                weights = Total_count, 
+                family=binomial(link="logit"))
+summary(waspglm2)
+
+waspglm2_noG0 <- glm(Wasp_proportion ~ G1, data=Wasp_data,
+                      weights = Total_count,
+                      family=binomial(link="logit"))
+
+waspglm2_noint <- glm(Wasp_proportion ~ G1+G0, data=Wasp_data,
+                      weights = Total_count,
+                      family=binomial(link="logit"))
+
+waspglm2_sepG0 <- glm(Wasp_proportion ~ G1*factor(G0), data=Wasp_data,
+                      weights = Total_count,   
+                      family=binomial(link="logit"))
+## Treating G0 as a factor instead of a number (i.e a different fit for each of the G0 options)
+
+AIC(waspglm2, waspglm2_noG0, waspglm2_noint, waspglm2_sepG0) 
+## Very strong support for interaction, and for separating the G0.
+```
+
+# Model comparison table
+
+```{r}
+data_table_wasp1 <- data.frame(
+  Model = c('2a',  '2b',  '2c', '2d'),
+  Interaction = c('Absent', 'Absent',  'Present', 'Present'),
+  G0 = c('Absent',   'Linear', 'Linear','Factor'),
+  Explanatory_variable = c('G1', 'G1+G0', 'G1*G0','G1*factor(G0)'),
+  n = c('2', '3', '4',  '6'),
+  Likelihood = round(c(logLik(waspglm2_noG0),    logLik(waspglm2_noint), 
+                       logLik(waspglm2),   logLik(waspglm2_sepG0)),
+                     digits = 2),
+  AIC_Difference = round(c(
+    (AIC(waspglm2_noG0)-AIC(waspglm2_sepG0)), 
+    (AIC(waspglm2_noint)-AIC(waspglm2_sepG0)), 
+    (AIC(waspglm2)-AIC(waspglm2_sepG0)), 
+    (AIC(waspglm2_sepG0)-AIC(waspglm2_sepG0))), digits = 2)
+)
+
+data_table_wasp1
+```
+
+```{r}
+write.csv(data_table_wasp1, "Outputs/wasp_output1.csv", row.names = FALSE)
+```
+
+# Model for simulation
+
+```{R}
+waspglm2_poly <- glm(Wasp_proportion ~ G1*poly(G0,2),
+                     data=Wasp_data,
+                     weights = Total_count,    
+                     family=binomial(link="logit"))
+```
+
+```{r}
+new_data_seq <- expand_grid(G1 = seq(18, 29, by = 0.01),
+                            G0 = c(19, 23, 27))
+new_data_seq$predictions_glm2<- predict(waspglm2, newdata = new_data_seq,type='response' )
+new_data_seq$predictions_NoG0<- predict(waspglm2_noG0, newdata = new_data_seq,type='response' )
+new_data_seq$predictions_NoInt<- predict(waspglm2_noint, newdata = new_data_seq,type='response' )
+new_data_seq$predictions_sepG0<- predict(waspglm2_sepG0, newdata = new_data_seq,type='response' )
+new_data_seq$predictions_poly<- predict(waspglm2_poly, newdata = new_data_seq,type='response' )
+```
+
+# Plotting
+
+```{r}
+new_data_seq %>%
+  rename ( `G0 Temperature` = G0) %>%
+  ggplot() +
+  geom_point(aes(G1, Wasp_proportion),
+             data =  rename ( Wasp_data,`G0 Temperature` = G0),
+             alpha=0.5, size =1) +
+  geom_line(aes(G1, predictions_sepG0), col = '#0072B2') +
+  theme_bw(base_size = 12) +
+  theme(text = element_text(size = 10),
+        strip.background = element_rect(fill =NA)) +
+  scale_x_continuous(breaks = seq(19, 27, by = 2)) +
+  labs(x = 'G1 Temperature (ºC)',
+       y = 'Wasp Proportion)')+
+  facet_wrap(~`G0 Temperature`, labeller = label_both)
+
+ggsave('Figures/Wasp Response.png', width = 6, height = 4 )
+
+```
+
+```{r eval = FALSE}
+save(waspglm2_poly, file = 'Outputs/WaspModel') ## save to be loaded into simulation
+save(waspglm2_noG0, file = 'Outputs/WaspModel_NoG0') ## save to be loaded into simulation
+
+```
+
+# Confidence Intervals
+```{r}
+wasp_conf_intervals <- confint(waspglm2_sepG0)
+wasp_conf_intervals <- round(wasp_conf_intervals, digits = 2)
+wasp_conf_intervals
+```
+
+# Checking that sepG0 and polynomial model are definitely identical
+
+```{r}
+new_data_seq1 <- expand_grid(G1 = seq(18, 30, by = 0.01),
+                            G0 = c(19, 23, 27))
+new_data_seq1$predictions_sepG0<- predict(waspglm2_sepG0, newdata = new_data_seq1,type='response' )
+new_data_seq1$predictions_poly<- predict(waspglm2_poly, newdata = new_data_seq1,type='response' )
+
+new_data_seq1 %>%
+  ggplot() +
+  geom_point(aes(G1, Wasp_proportion), data = Wasp_data, alpha=0.7) +
+  geom_line(aes(G1, predictions_sepG0), col = '#009E73') +
+  geom_line(aes(G1, predictions_poly), col = '#0072B2', linetype=2) +
+  theme_bw(base_size = 12) +
+  labs(x = 'Temperature (ºC)',
+       y = 'Wasp Proportion')+
+  ggtitle( 'Wasp Thermal Performance')+
+  facet_wrap(~G0, labeller = label_both)
+
+```
+
+# Session Info
+```{r}
+sessionInfo()
+```
+

@@ -1,0 +1,5 @@
+"Model","Interaction","G0","Explanatory_variable","n","Likelihood","AIC_Difference"
+"2a","Absent","Absent","G1","2",-4913.71,1364.77
+"2b","Absent","Linear","G1+G0","3",-4552.96,645.28
+"2c","Present","Linear","G1*G0","4",-4397.26,335.87
+"2d","Present","Factor","G1*factor(G0)","6",-4227.32,0
