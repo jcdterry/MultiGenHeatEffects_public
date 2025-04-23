@@ -418,12 +418,27 @@ LongFormExtData %>%
   theme(text = element_text(size = 10),
         strip.background = element_rect(fill =NA)) +
   labs(x = "Time to extinction (generations)", y = "Frequency")+
-  scale_x_log10(limits = c(200, 3000))
+  scale_x_log10(limits = c(200, 2500))
 
+Labels<- data.frame(AC = 'Auto',
+                    Model = c('ModelB','ModelB', 'ModelA'),
+                    x = c(1500, 800, 800),
+                    y = c(22,10,16),
+                    text = c('"Wasp-Only" and "None"\nTransgenerational effects\nmodels overlap',
+                             '"Fly-Only" and "Both"\nTransgenerational effects\nmodels overlap',
+                             '"Fly-Only" and "Both"\nTransgenerational effects\nmodels do not overlap'))
 
+Pointers <- data.frame( AC = 'Auto',
+                    Model = c('ModelB','ModelB', 'ModelA'),
+                    x = c(1500, 1000, 800),
+                    y = c(15,8,10),
+                    xend = c(1800, 1200, 1200),
+                    yend = c(5,5,5))
 
+Gen_to_time <- Vectorize(function(time){return(24+(time-500)*0.0025)}) ## NB inaccurate below 500
+  
 LongFormExtData %>%
-  mutate(TransMod = case_match(TransGen,
+ mutate(TransMod = case_match(TransGen,
                                            "BothTrans" ~ "Both", 
                                            "NoTrans" ~ "None",
                                            'WaspTrans' ~ "Wasp Only"  ,
@@ -432,6 +447,8 @@ LongFormExtData %>%
   ggplot( aes( x = Extinctions))+
   geom_density(aes( fill = fct_relevel(TransMod, rev(c("Both", "Wasp Only","Fly Only", "None")))),
                     alpha = 0.5)   +
+    geom_text( aes( label = text, x=x, y=y), data = Labels, size =3)+
+  geom_segment(aes( x=x, y=y, xend=xend, yend=yend), data = Pointers)+
   #  geom_histogram(binwidth=log10(50), fill="#0072B2", colour="black")+
   facet_grid(AC~Model,
              labeller = labeller(AC=c("Auto" = "With Autocorrelation",
@@ -439,14 +456,18 @@ LongFormExtData %>%
                                  Model=c("ModelA" = "Model A",
                                          "ModelB" = "Model B")), switch = 'y')+
   theme_bw(base_size = 12) +
+  
   scale_fill_manual( name = 'Transgenerational\nEffects', values = c('blue','gold','darkgreen', 'red'))+
   theme(text = element_text(size = 10),
         strip.background = element_rect(fill =NA), legend.position = 'bottom') +
-  labs(x = "Time to extinction (generations)", y = "Frequency Density")+
-  scale_x_log10(limits = c(200, 3000))
+  labs(x = " Mean Temperature\n Generations, including burn-in\n(Log-Scale)",
+       y = "Frequency Density of Extinctions")+
+  scale_x_log10(limits = c(500, 2500),
+                breaks = c(500, 900, 1300, 1700, 2100, 2500  ),
+                labels = ~paste0( Gen_to_time(.), '°C',"\n",.))
 
 
-ggsave('Figures/SimulationHistograms.png', width = 6, height =5)
+ggsave('Figures/SimulationHistograms.png', width = 7, height =6)
 
 ```
 

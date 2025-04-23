@@ -4,5 +4,5 @@
 "1c","Negative Binomial","theta_i=Ttheta_T,i + theta_19,i",7,-2426.88,88.07
 "1d","Negative Binomial","theta_i= { If T=19, t ",10,-2379.85,0
 "1e","Negative Binomial","Like 1d for Rmax and a, and like 1b for Topt",8,-2427.3,90.91
-"1f","Negative Binomial","Like 1d for Topt and a, and like 1b for Rmax",8,-3965.3,3166.92
-"1g","Negative Binomial","Like 1d for Topt and Rmax, and like 1b for a",8,-3756.14,2748.59
+"1f","Negative Binomial","Like 1d for Topt and a, and like 1b for Rmax",8,-2482.53,201.36
+"1g","Negative Binomial","Like 1d for Topt and Rmax, and like 1b for a",8,-2440.89,118.1

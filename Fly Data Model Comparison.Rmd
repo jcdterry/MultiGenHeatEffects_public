@@ -324,13 +324,15 @@ NB_All_Ex_rmax_fit <- mle2(NB_All_Ex_rmax,
                            method="L-BFGS-B",
                            upper=c('topt19' = 29, 'topt23' = 29,  'topt27' = 29,
                                    'shape' =10,
+                                   'rmax' = 1000,
                                    'a19' = 100, 'a23' = 100, 'a27' = 100),
                            lower=c('topt19' = 20, 'topt23' = 20, 'topt27' = 20,
                                    'shape' = 0.0001,
+                                   'rmax' = 1,
                                    'a19' = 0.5, 'a23' = 0.5, 'a27' = 0.5),
-                           start = list( 'topt19' = 25, 'rmax' = 100,
-                                         'topt23' = 25,  'topt27' = 25,
+                           start = list( 'topt19' = 25,  'topt23' = 25,  'topt27' = 25,
                                          'shape' =1,
+                                         'rmax' = 100,
                                          'a19' = 1, 'a23' = 1,  'a27' = 1),
                            data = Fly_data)
 
@@ -376,14 +378,17 @@ NB_All_Ex_a_fit <- mle2(NB_All_Ex_a ,
                         method="L-BFGS-B",
                         upper=c('topt19' = 29,  'rmax19' = 1000,'topt23' = 29,
                                 'rmax23' = 1000, 'topt27' = 29,'rmax27' = 1000,
-                                'shape' =10),
+                                'shape' =10,
+                                'a' = 100),
                         lower=c('topt19' = 20, 'rmax19' = 1,'topt23' = 20,
                                 'rmax23' = 1, 'topt27' = 20,  'rmax27' = 1,
-                                'shape' = 0.0001),
+                                'shape' = 0.0001, 
+                                a = 0.5),
                         start = list( 'topt19' = 25, 'rmax19' = 100,
                                       'rmax23' = 100, 'rmax27' = 100,
                                       'topt23' = 25, 'topt27' = 25,
-                                      'shape' =1,'a'=1),
+                                      'shape' =1,
+                                      'a'=1),
                         data = Fly_data)
 
 NB_All_Ex_a_fit
@@ -598,6 +603,26 @@ for(i in 1: nrow(Prediction)){
   }
 ```
 
+## Confidence interval around model. 
+
+
+```{r}
+SHAPE <- NB_AllG0Seperate_fit@coef['shape']
+
+Prediction$LowerExp <-qnbinom(p = 1/6,size = SHAPE, mu = Prediction$Expectation )
+Prediction$UpperExp <-qnbinom(p = 5/6,size = SHAPE, mu = Prediction$Expectation )
+
+qnorm( 0.975, mean =  0, sd = 1)
+
+
+
+Prediction
+
+
+```
+
+
+
 ## Plotting
 
 ```{r}
@@ -605,7 +630,7 @@ for(i in 1: nrow(Prediction)){
 Fly_data %>%
  rename ( `G0 Temperature` = G0) %>%
   ggplot() +
-  geom_point(aes(G1, Count), alpha=0.5, size = 1) +
+  geom_jitter(aes(G1, Count), alpha=0.5, size = 1, width = 0.15, height =0) +
   geom_line(aes(G1, Expectation), col = '#0072B2',
             data =  rename (Prediction,`G0 Temperature` = G0))+
   theme_bw(base_size = 12) +
@@ -617,13 +642,16 @@ Fly_data %>%
   facet_wrap(~`G0 Temperature`, labeller = label_both )
 
   ggsave('Figures/Fly TPC Fit.png', width = 6, height = 4 )
-
-
+  
 Fly_data %>%
- rename ( `G0 Temperature` = G0) %>%
+  group_by(  G0,G1)%>% 
+  summarise(MEAN= mean(Count),
+            SE = sd(Count)/sqrt(n())  ) %>%
+  rename ( `G0 Temperature` = G0) %>%
   ggplot() +
-  geom_boxplot(aes(G1, Count, group = G1))+ 
-  geom_point(aes(G1, Count), alpha=0.5, size = 0.5) +
+  geom_point(aes(G1, MEAN), size = 1) +
+    geom_point(aes(G1, Count), alpha=0.5, size = 0.5, data = rename (Fly_data, `G0 Temperature` = G0) ) +
+  geom_errorbar(aes( x = G1, ymin = MEAN-SE, ymax = MEAN+SE))+
   geom_line(aes(G1, Expectation), col = '#0072B2',
             data =  rename (Prediction,`G0 Temperature` = G0) ) +
   theme_bw(base_size = 12) +
@@ -634,7 +662,7 @@ Fly_data %>%
        y = 'Emerged Offspring')+
   facet_wrap(~`G0 Temperature`, labeller = label_both )
 
-ggsave('Figures/Fly TPC Fit_boxplot.png', width = 6, height = 4 )
+ggsave('Figures/Fly TPC Fit_se.png', width = 6, height = 4 )
 
 ```
 
