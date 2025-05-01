@@ -460,7 +460,7 @@ LongFormExtData %>%
   scale_fill_manual( name = 'Transgenerational\nEffects', values = c('blue','gold','darkgreen', 'red'))+
   theme(text = element_text(size = 10),
         strip.background = element_rect(fill =NA), legend.position = 'bottom') +
-  labs(x = " Mean Temperature\n Generations, including burn-in\n(Log-Scale)",
+  labs(x = " Mean Temperature\nGenerations\n(Log-Scale)",
        y = "Frequency Density of Extinctions")+
   scale_x_log10(limits = c(500, 2500),
                 breaks = c(500, 900, 1300, 1700, 2100, 2500  ),
